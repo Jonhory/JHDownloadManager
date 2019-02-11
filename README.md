@@ -8,3 +8,6 @@
 * 自定义文件夹路径
 * 自定义文件后缀
 * 后台下载
+* 文件名获取
+* 文件夹路径获取
+* 选择蜂窝网络下是否允许下载 <https://blog.csdn.net/hero_wqb/article/details/80407478>

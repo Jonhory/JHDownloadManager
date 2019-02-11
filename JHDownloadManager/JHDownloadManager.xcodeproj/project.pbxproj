@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		BB63A41621F71831007749BC /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = BB63A41521F71831007749BC /* README.md */; };
+		BB989566220031A7003229D8 /* TestCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB989565220031A7003229D8 /* TestCell.swift */; };
+		BB989568220038B2003229D8 /* TestCellModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB989567220038B2003229D8 /* TestCellModel.swift */; };
 		BBE1786821F5BEC30042087A /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBE1786721F5BEC30042087A /* AppDelegate.swift */; };
 		BBE1786A21F5BEC30042087A /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBE1786921F5BEC30042087A /* ViewController.swift */; };
 		BBE1786D21F5BEC30042087A /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = BBE1786B21F5BEC30042087A /* Main.storyboard */; };
@@ -16,6 +19,9 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		BB63A41521F71831007749BC /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; name = README.md; path = ../../README.md; sourceTree = "<group>"; };
+		BB989565220031A7003229D8 /* TestCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestCell.swift; sourceTree = "<group>"; };
+		BB989567220038B2003229D8 /* TestCellModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestCellModel.swift; sourceTree = "<group>"; };
 		BBE1786421F5BEC30042087A /* JHDownloadManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JHDownloadManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		BBE1786721F5BEC30042087A /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		BBE1786921F5BEC30042087A /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
@@ -57,9 +63,12 @@
 		BBE1786621F5BEC30042087A /* JHDownloadManager */ = {
 			isa = PBXGroup;
 			children = (
+				BB63A41521F71831007749BC /* README.md */,
 				BBE1787921F5BEFB0042087A /* JHDownloadManager */,
 				BBE1786721F5BEC30042087A /* AppDelegate.swift */,
 				BBE1786921F5BEC30042087A /* ViewController.swift */,
+				BB989565220031A7003229D8 /* TestCell.swift */,
+				BB989567220038B2003229D8 /* TestCellModel.swift */,
 				BBE1787F21F5C6F60042087A /* oc_swift_bridge.h */,
 				BBE1786B21F5BEC30042087A /* Main.storyboard */,
 				BBE1786E21F5BEC60042087A /* Assets.xcassets */,
@@ -109,6 +118,11 @@
 				TargetAttributes = {
 					BBE1786321F5BEC30042087A = {
 						CreatedOnToolsVersion = 10.1;
+						SystemCapabilities = {
+							com.apple.BackgroundModes = {
+								enabled = 1;
+							};
+						};
 					};
 				};
 			};
@@ -137,6 +151,7 @@
 			files = (
 				BBE1787221F5BEC60042087A /* LaunchScreen.storyboard in Resources */,
 				BBE1786F21F5BEC60042087A /* Assets.xcassets in Resources */,
+				BB63A41621F71831007749BC /* README.md in Resources */,
 				BBE1786D21F5BEC30042087A /* Main.storyboard in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -149,7 +164,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				BBE1786A21F5BEC30042087A /* ViewController.swift in Sources */,
+				BB989566220031A7003229D8 /* TestCell.swift in Sources */,
 				BBE1787B21F5BF070042087A /* JHDownloadManager.swift in Sources */,
+				BB989568220038B2003229D8 /* TestCellModel.swift in Sources */,
 				BBE1786821F5BEC30042087A /* AppDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -304,7 +321,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.jdj.JHDownloadManager;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_OBJC_BRIDGING_HEADER = "/Users/jonhory/Desktop/Computer/H_Github项目/JHDownloadManager/JHDownloadManager/JHDownloadManager/oc_swift_bridge.h";
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/JHDownloadManager/oc_swift_bridge.h";
 				SWIFT_VERSION = 4.2;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -322,7 +339,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.jdj.JHDownloadManager;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_OBJC_BRIDGING_HEADER = "/Users/jonhory/Desktop/Computer/H_Github项目/JHDownloadManager/JHDownloadManager/JHDownloadManager/oc_swift_bridge.h";
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/JHDownloadManager/oc_swift_bridge.h";
 				SWIFT_VERSION = 4.2;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

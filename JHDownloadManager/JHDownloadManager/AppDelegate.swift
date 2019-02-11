@@ -12,11 +12,20 @@ import UIKit
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
-
+    var cc: (() -> Void)?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Override point for customization after application launch.
         return true
+    }
+    
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void) {
+//        cc = completionHandler
+//        let ds = URLSession(configuration: .background(withIdentifier: identifier), delegate: JHDownloadManager.shared, delegateQueue: nil)
+//        JHDownloadManager.shared.session = ds
+//        print("handleEventsForBackgroundURLSession : ", identifier)
+        
+        JHDownloadManager.shared.addCompletionHandler(completionHandler, identifier: identifier)
     }
 
     func applicationWillResignActive(_ application: UIApplication) {

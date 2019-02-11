@@ -7,10 +7,13 @@
 //
 
 import Foundation
+import UIKit
+import Network
 
 enum JHDownloadState: Int {
     
     case start
+    case downloading
     case paused
     case completed
     case failed
@@ -21,6 +24,7 @@ extension JHDownloadState {
     var desc: String {
         switch self {
         case .start: return "开始"
+        case .downloading: return "下载中"
         case .paused: return "暂停"
         case .completed: return "完成"
         case .failed: return "失败"
@@ -30,33 +34,90 @@ extension JHDownloadState {
 
 class JHDownloadSessionModel {
     
+    var resumeData: Data?
+    
     var stream: OutputStream?
     lazy var url = ""
     lazy var totalLength: Int = 0
     
-    var progressBlock: ((_ receivedSize: Int, _ expectedSize: Int, _ progress: Float) -> Void)?
-    var stateBlock: ((_ state: JHDownloadState) -> Void)?
+    var progressBlock: ((_ receivedSize: Int, _ expectedSize: Int, _ progress: Float, _ speed: String) -> Void)?
+    var stateBlock: ((_ state: JHDownloadState, _ error: Error?) -> Void)?
+    
+    var currentState: JHDownloadState = .start
+    
+    var bytesWritten: Int64 = 0 {
+        didSet {
+            totalBytesWritten += bytesWritten
+            if date == nil {
+                date = Date()
+            }
+        }
+    }
+    
+    var speed: Double {
+        let currentDate = Date()
+        let time = currentDate.timeIntervalSince(date!)
+        
+        if time >= 1 {
+            lastSpeed = Double(totalBytesWritten) / Double(time)
+            date = currentDate
+            totalBytesWritten = 0
+        }
+        return lastSpeed
+    }
+    
+    var speedFormatter: String {
+        if speed == 0 { return "0 kb"}
+        return ByteCountFormatter.string(fromByteCount: Int64(speed), countStyle: .file)
+    }
+    
+    private var lastSpeed: Double = 0
+    private var totalBytesWritten: Int64 = 0
+    private var date: Date?
 }
 
 class JHDownloadManager: NSObject {
     
-    override init() {
-        super.init()
-        JHLog("JHDownloadManager 缓存路径: \(cachesDirectory)")
-    }
+    static let shared = JHDownloadManager()
+    private override init() { super.init() }
+    
+    typealias JHCompletionHandler = () -> Void
+    
+    /// 网络连接类
+    var session: URLSession?
+    /// 是否支持后台下载，默认是
+//    var isSupportBackground: Bool = true
+    /// 是否允许蜂窝网络下的数据请求
+    var allowsCellularAccess: Bool = false
+    /// 最大并发数
+    var httpMaximumConnectionsPerHost: Int = 3
+    /// 可适配文件夹名称 例如将视频文件放在 videoCache 音频文件放在 musicCache 图片文件放在 imageCache
+    var cachesDirName: String = "JHDownloadCache"
+    /// 缓存路径
+    lazy var cachesDirectory: String = {
+        let doc = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true).last
+        if doc != nil && doc != "" { return doc! + "/\(cachesDirName)" }
+        return ""
+    }()
+    
+    /// 用于存储downloadTask续传时用到的 resumeData
+    lazy var resumeDataCachesDir: String = {
+        return cachesDirectory + "/resumeData"
+    }()
     
     /// 保存所有任务 资源地址md5值为key
     fileprivate lazy var tasks: [String: URLSessionTask] = [:]
     /// 保存所有下载相关信息
     fileprivate lazy var sessionModels: [Int: JHDownloadSessionModel] = [:]
+    /// 回调存储
+    fileprivate lazy var completionHandlerDict: [String: JHCompletionHandler] = [:]
     
-    /// 缓存路径
-    fileprivate lazy var cachesDirectory: String = {
-        let doc = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true).last
-        if doc != nil && doc != "" { return doc! + "/JHDownloadCache" }
-        return ""
-    }()
-
+    fileprivate let fileKey_length: String = "length"
+    fileprivate let fileKey_name: String = "name"
+    fileprivate let fileKey_type: String = "type"
+    fileprivate let fileKey_url: String = "url"
+    
+    var resu: Data?
 }
 
 extension JHDownloadManager {
@@ -83,9 +144,36 @@ extension JHDownloadManager {
         return 0
     }
     
-    /// 存储文件长度的文件路径
-    fileprivate func totalLengthFullPath() -> String {
-        return cachesDirectory + "/jhDownloadTotalSize.plist"
+    /// 存储文件内容的文件路径
+    fileprivate func fileHelperFullPath() -> String {
+        return cachesDirectory + "/jhFileHelper.plist"
+    }
+    
+    /// 需要存储的文件内容key包括: length 资源大小 name 文件名 type 文件类型 url 资源路径
+    fileprivate func setFile(values: [String], forKeys: [String], url: String) {
+        if values.count != forKeys.count {
+            JHLog("请检查keyValue匹配: values:\(values), keys: \(forKeys)")
+            return
+        }
+        var mainDic = NSMutableDictionary(contentsOfFile: fileHelperFullPath())
+        if mainDic == nil { mainDic = NSMutableDictionary() }
+        var dic = mainDic![fileName(with: url)] as? NSMutableDictionary
+        if dic == nil { dic = NSMutableDictionary() }
+        for i in 0..<values.count {
+            dic?.setValue(values[i], forKey: forKeys[i])
+        }
+        dic?.setValue(url, forKey: fileKey_url)
+        mainDic?.setValue(dic!, forKey: fileName(with: url))
+        mainDic?.write(toFile: fileHelperFullPath(), atomically: true)
+    }
+    
+    fileprivate func getFile(forKey: String, url: String) -> String {
+        if let mainDic = NSMutableDictionary(contentsOfFile: fileHelperFullPath()) {
+            if let dic = mainDic[fileName(with: url)] as? NSMutableDictionary {
+                return (dic[forKey] as? String) ?? ""
+            }
+        }
+        return ""
     }
     
     /// 创建缓存文件夹
@@ -94,7 +182,7 @@ extension JHDownloadManager {
             do {
                 try FileManager.default.createDirectory(atPath: cachesDirectory, withIntermediateDirectories: true, attributes: nil)
             } catch {
-                JHLog("创建缓存文件夹失败")
+                JHLog("创建缓存文件夹失败!!!!")
             }
         }
     }
@@ -102,16 +190,19 @@ extension JHDownloadManager {
     fileprivate func start(url: String) {
         if let task = getTask(url: url) {
             task.resume()
-            JHLog("开始下载: \(url)")
-            sessionModels[task.taskIdentifier]?.stateBlock?(.start)
+            JHLog("开始下载: \(url.components(separatedBy: ".com")[0])  index: \(url.last!)")
+            sessionModels[task.taskIdentifier]?.stateBlock?(.downloading, nil)
+            sessionModels[task.taskIdentifier]?.currentState = .downloading
         }
     }
     
     fileprivate func pause(url: String) {
         if let task = getTask(url: url) {
+            sessionModels[task.taskIdentifier]?.stateBlock?(.paused, nil)
+            sessionModels[task.taskIdentifier]?.currentState = .paused
+            
             task.suspend()
-            JHLog("暂停下载: \(url)")
-            sessionModels[task.taskIdentifier]?.stateBlock?(.paused)
+            JHLog("暂停下载: \(url.components(separatedBy: ".com")[0])")
         }
     }
     
@@ -128,11 +219,11 @@ extension JHDownloadManager {
     ///   - url: 资源路径
     ///   - progress: 下载进度
     ///   - state: 下载状态
-    func download(url: String, progress: @escaping ((_ receivedSize: Int, _ expectedSize: Int, _ progress: Float) -> Void), state:  @escaping ((_ state: JHDownloadState) -> Void)) {
+    func download(url: String, name: String = "", type: String = "", isSupportBackground: Bool = true, progress: @escaping ((_ receivedSize: Int, _ expectedSize: Int, _ progress: Float, _ speed: String) -> Void), state:  @escaping ((_ state: JHDownloadState, _ error: Error?) -> Void)) {
         if url.isEmpty { return }
         if isCompletion(with: url) {
-            progress(downloadLength(with: url), totalLengthSize(with: url), 1.0)
-            state(.completed)
+            progress(downloadLength(with: url), totalLengthSize(with: url), 1.0 ,"0 kb")
+            state(.completed, nil)
             JHLog("该资源已下载完成 >>> \(url)")
             return
         }
@@ -147,13 +238,34 @@ extension JHDownloadManager {
         }
         
         createCacheDirectory()
+        setFile(values: [name, type], forKeys: [fileKey_name, fileKey_type], url: url)
         
-        let session = URLSession(configuration: .default, delegate: self, delegateQueue: OperationQueue())
+        if session == nil {
+            let sessionID = "com.jonhory.sessionID"
+            
+            var config: URLSessionConfiguration!
+            if isSupportBackground {
+                config = URLSessionConfiguration.background(withIdentifier: sessionID)
+            } else {
+                config = URLSessionConfiguration.ephemeral
+            }
+            config.timeoutIntervalForRequest = 5
+            config.isDiscretionary = true
+            config.allowsCellularAccess = allowsCellularAccess
+            config.httpMaximumConnectionsPerHost = httpMaximumConnectionsPerHost
+                
+            session = URLSession(configuration: config, delegate: self, delegateQueue: OperationQueue.main)
+        }
         if let stream = OutputStream(toFileAtPath: fileFullPath(with: url), append: true), let u = URL(string: url) {
             var request = URLRequest(url: u)
             request.setValue(String(format: "bytes=%zd-", downloadLength(with: url)), forHTTPHeaderField: "Range")
             
-            let task = session.dataTask(with: request)
+            var task: URLSessionTask!
+            if !isSupportBackground {
+                task = session!.dataTask(with: request)
+            } else {
+                task = session!.downloadTask(with: request)
+            }
             let taskID = Int(arc4random()%100000) + Int(Date().jh_milliStamp)
             task.setValue(taskID, forKey: "taskIdentifier")
             
@@ -167,6 +279,8 @@ extension JHDownloadManager {
             sessionModels[taskID] = sessionModel
             
             start(url: url)
+        } else {
+            JHLog("Error: 请检查URL是否正常:\(url)")
         }
         
     }
@@ -187,12 +301,7 @@ extension JHDownloadManager {
     /// - Parameter url: 资源路径
     /// - Returns: 资源总大小（bytes）
     func totalLengthSize(with url: String) -> Int {
-        if let dic = NSDictionary(contentsOfFile: totalLengthFullPath()) {
-            if let v = dic.value(forKey: fileName(with: url)) {
-                return v as! Int
-            }
-        }
-        return 0
+        return Int(getFile(forKey: fileKey_length, url: url)) ?? 0
     }
     
     /// 判断资源是否完成
@@ -222,11 +331,13 @@ extension JHDownloadManager {
             } catch {
                 JHLog("删除资源失败：\(url)")
             }
+        } else {
+            JHLog("文件不存在:\(url)")
         }
-        if manager.fileExists(atPath: totalLengthFullPath()) {
-            if let dict = NSMutableDictionary(contentsOfFile: totalLengthFullPath()) {
+        if manager.fileExists(atPath: fileHelperFullPath()) {
+            if let dict = NSMutableDictionary(contentsOfFile: fileHelperFullPath()) {
                 dict.removeObject(forKey: fileName(with: url))
-                dict.write(toFile: totalLengthFullPath(), atomically: true)
+                dict.write(toFile: fileHelperFullPath(), atomically: true)
             }
         }
     }
@@ -253,8 +364,87 @@ extension JHDownloadManager {
         }
     }
     
+    func addCompletionHandler(_ handler: @escaping () -> Void, identifier: String) {
+        if completionHandlerDict[identifier] == nil {
+            completionHandlerDict[identifier] = handler
+            print("回调保存成功 addCompletionHandler: \(identifier)")
+        }
+    }
+    
+    func callCompletionHandlerForSession(_ identifier: String) {
+        if let handle = completionHandlerDict[identifier] {
+            completionHandlerDict.removeValue(forKey: identifier)
+            print("调用callCompletionHandlerForSession处理下载完成以后需要更新处理的任务工作")
+            handle()
+            
+//            guard let sessionModel = sessionModels[Int(identifier)] else {
+//                return
+//            }
+//            if isCompletion(with: sessionModel.url) {
+//                sessionModel.stateBlock?(.completed)
+//            } else {
+//                sessionModel.stateBlock?(.failed)
+//            }
+        }
+//        DispatchQueue.main.async {
+//            if let app = UIApplication.shared.delegate as? AppDelegate {
+//                if let c = app.cc {
+//                    c()
+//                    app.cc = nil
+//                }
+//            }
+//        }
+    }
+    
 }
 
+//MARK: - URLSessionTaskDelegate
+extension JHDownloadManager: URLSessionTaskDelegate {
+    
+    func urlSession(_ session: URLSession, didBecomeInvalidWithError error: Error?) {
+        print("⚠️⚠️⚠️⚠️ : ", error?.localizedDescription ?? "")
+    }
+    
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        
+        if error != nil {
+            print("用户杀掉应用，重启应用触发")
+        }
+        
+        guard let sessionModel = sessionModels[task.taskIdentifier] else {
+            return
+        }
+
+        if sessionModel.currentState == .paused {
+            if let er = error as NSError?, er.code == -1001 || er.code == -999 {
+                return
+            }
+        }
+
+        JHLog("任务成功结束: \(sessionModel.url.components(separatedBy: ".com")[0])")
+
+        if isCompletion(with: sessionModel.url) {
+            sessionModel.stateBlock?(.completed, nil)
+            let total = totalLengthSize(with: sessionModel.url)
+            sessionModel.progressBlock?(total, total, 1.0, "0 kb")
+        } else {
+            sessionModel.stateBlock?(.failed, nil)
+        }
+        
+        sessionModel.stream?.close()
+        sessionModel.stream = nil
+
+        tasks.removeValue(forKey: fileName(with: sessionModel.url))
+        sessionModels.removeValue(forKey: task.taskIdentifier)
+
+        if error != nil {
+            print("任务下载完成 ❌: \(error!.localizedDescription)")
+            sessionModel.stateBlock?(.failed, error)
+        }
+    }
+}
+
+//MARK: - URLSessionDataDelegate
 extension JHDownloadManager: URLSessionDataDelegate {
     
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
@@ -264,12 +454,8 @@ extension JHDownloadManager: URLSessionDataDelegate {
             
             let totalLength = Int(response.expectedContentLength) + downloadLength(with: sessionModel.url)
             sessionModel.totalLength = totalLength
-            
-            var dict = NSMutableDictionary(contentsOfFile: totalLengthFullPath())
-            if dict == nil { dict = NSMutableDictionary() }
-            dict?.setValue(totalLength, forKey: fileName(with: sessionModel.url))
-            dict?.write(toFile: totalLengthFullPath(), atomically: true)
-            
+
+            setFile(values: ["\(totalLength)"], forKeys: [fileKey_length], url: sessionModel.url)
             completionHandler(.allow)
         }
     }
@@ -284,31 +470,79 @@ extension JHDownloadManager: URLSessionDataDelegate {
             let expectedSize = sessionModel.totalLength
             let progress = Float(receivedSize) / Float(expectedSize)
             
-            sessionModel.progressBlock?(receivedSize, expectedSize, progress)
-        }
-    }
-    
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let sessionModel = sessionModels[task.taskIdentifier] {
-            JHLog("任务结束: \(sessionModel.url)")
-            if isCompletion(with: sessionModel.url) {
-                sessionModel.stateBlock?(.completed)
-            } else {
-                sessionModel.stateBlock?(.failed)
-            }
-            sessionModel.stream?.close()
-            sessionModel.stream = nil
+            sessionModel.bytesWritten = Int64(bytes.count)
             
-            tasks.removeValue(forKey: fileName(with: sessionModel.url))
-            sessionModels.removeValue(forKey: task.taskIdentifier)
+            sessionModel.progressBlock?(receivedSize, expectedSize, progress, sessionModel.speedFormatter)
+            
+            if progress < 1.0 {
+                sessionModel.stateBlock?(.downloading, nil)
+            }
         }
     }
     
 }
 
+//MARK: - URLSessionDownloadDelegate
+extension JHDownloadManager: URLSessionDownloadDelegate {
+    
+    //使用任务的cancel(byProducingResumeData:)方法来取消下载。通过任务的downloadTask(withResumeData:)和downloadTask(withResumeData:completionHandler:)来开启一个新的下载任务继续下载，回到第一步。
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        
+        guard let sessionModel = sessionModels[downloadTask.taskIdentifier] else {
+            return
+        }
+        
+        let receivedSize = Int(totalBytesWritten)
+        let expectedSize = Int(totalBytesExpectedToWrite)
+        let progress = Float(receivedSize) / Float(expectedSize)
+        
+        sessionModel.bytesWritten = bytesWritten
+        
+        sessionModel.progressBlock?(receivedSize, expectedSize, progress, sessionModel.speedFormatter)
+        
+        if progress < 1.0 {
+            sessionModel.stateBlock?(.downloading, nil)
+        }
+
+        setFile(values: ["\(expectedSize)"], forKeys: [fileKey_length], url: sessionModel.url)
+    }
+    
+    //方法中有一个文件临时存放的位置。我们需要在这里使用这些数据或者把数据保存到一个永久的位置。
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        
+        guard let sessionModel = sessionModels[downloadTask.taskIdentifier] else {
+            return
+        }
+        do {
+            try FileManager.default.moveItem(atPath: location.path, toPath: fileFullPath(with: sessionModel.url))
+            let total = totalLengthSize(with: sessionModel.url)
+            if isCompletion(with: sessionModel.url) {
+                sessionModel.progressBlock?(total, total, 1.0, "0 kb")
+                sessionModel.stateBlock?(.completed, nil)
+            } else {
+                sessionModel.progressBlock?(downloadLength(with: sessionModel.url), total, progressSize(with: sessionModel.url), "0 kb")
+                sessionModel.stateBlock?(.failed, nil)
+            }
+            session.finishTasksAndInvalidate()
+        } catch {
+            JHLog("拷贝文件失败:\(location.path)    toPath: \(fileFullPath(with: sessionModel.url))")
+        }
+        
+    }
+
+    /// 后台下载完成以后，需要调用唤起下完成要处理的任务
+    func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        JHLog("应用在后台，且后台所有task完成后，在所有其他URLSession和downloadTask委托方法执行完后回调。可在此方法下做下载数据管理和UI刷新。之后再调用1方法保存的completionHandler ")
+        if let id = session.configuration.identifier {
+            callCompletionHandlerForSession(id)
+        }
+    }
+
+}
+
 extension JHDownloadManager {
     
-    func JHLog<T>(_ messsage: T, file: String = #file, funcName: String = #function, lineNum: Int = #line) {
+    fileprivate func JHLog<T>(_ messsage: T, file: String = #file, funcName: String = #function, lineNum: Int = #line) {
         #if DEBUG
         let fileName = (file as NSString).lastPathComponent
         print("\(fileName):(\(lineNum))======>>>>>>\n\(messsage)")
